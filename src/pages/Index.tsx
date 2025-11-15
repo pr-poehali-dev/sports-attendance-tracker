@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, memo } from 'react';
+import { useState, useMemo, useCallback, memo, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+
+const API_URL = 'https://functions.poehali.dev/96830027-650a-4751-9835-58f4cc80fe6d';
 
 type Athlete = {
   id: number;
@@ -158,27 +160,36 @@ const GroupCard = memo(({ group, onEdit, onViewSchedule }: {
 GroupCard.displayName = 'GroupCard';
 
 const Index = () => {
-  const [athletes, setAthletes] = useState<Athlete[]>([
-    { id: 1, name: 'Алексей Смирнов', group: 'Боксёры', attendance: 95, status: 'active', lastVisit: 'Сегодня' },
-    { id: 2, name: 'Мария Петрова', group: 'Борцы', attendance: 88, status: 'active', lastVisit: 'Вчера' },
-    { id: 3, name: 'Дмитрий Козлов', group: 'Боксёры', attendance: 72, status: 'injured', lastVisit: '3 дня назад' },
-    { id: 4, name: 'Анна Волкова', group: 'Кроссфит', attendance: 91, status: 'active', lastVisit: 'Сегодня' },
-    { id: 5, name: 'Иван Соколов', group: 'Борцы', attendance: 65, status: 'rest', lastVisit: '5 дней назад' },
-    { id: 6, name: 'Елена Морозова', group: 'Кроссфит', attendance: 98, status: 'active', lastVisit: 'Сегодня' },
-  ]);
+  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [groups, setGroups] = useState<Group[]>([
-    { id: 1, name: 'Боксёры', count: 12, color: 'bg-primary' },
-    { id: 2, name: 'Борцы', count: 8, color: 'bg-secondary' },
-    { id: 3, name: 'Кроссфит', count: 15, color: 'bg-accent' },
-  ]);
+  useEffect(() => {
+    loadData();
+  }, []);
 
-  const [schedules, setSchedules] = useState<Schedule[]>([
-    { id: 1, group: 'Боксёры', day: 'Понедельник', time: '18:00', duration: '90 мин' },
-    { id: 2, group: 'Боксёры', day: 'Среда', time: '18:00', duration: '90 мин' },
-    { id: 3, group: 'Борцы', day: 'Вторник', time: '19:00', duration: '120 мин' },
-    { id: 4, group: 'Кроссфит', day: 'Понедельник', time: '17:00', duration: '60 мин' },
-  ]);
+  const loadData = async () => {
+    try {
+      const [athletesRes, groupsRes, schedulesRes] = await Promise.all([
+        fetch(`${API_URL}?path=athletes`),
+        fetch(`${API_URL}?path=groups`),
+        fetch(`${API_URL}?path=schedules`)
+      ]);
+      
+      const athletesData = await athletesRes.json();
+      const groupsData = await groupsRes.json();
+      const schedulesData = await schedulesRes.json();
+      
+      setAthletes(athletesData);
+      setGroups(groupsData);
+      setSchedules(schedulesData);
+    } catch (error) {
+      toast.error('Ошибка загрузки данных');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const [showCheckIn, setShowCheckIn] = useState(false);
   const [showAddAthlete, setShowAddAthlete] = useState(false);
@@ -201,81 +212,127 @@ const Index = () => {
     return { total, today, avg };
   }, [athletes]);
 
-  const handleCheckIn = useCallback((id: number) => {
-    setAthletes(prev => prev.map(a => 
-      a.id === id ? { ...a, checked: !a.checked, lastVisit: a.checked ? a.lastVisit : 'Сегодня' } : a
-    ));
+  const handleCheckIn = useCallback(async (id: number) => {
+    try {
+      await fetch(`${API_URL}?path=checkin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ athleteId: id })
+      });
+      
+      setAthletes(prev => prev.map(a => 
+        a.id === id ? { ...a, checked: !a.checked, lastVisit: 'Сегодня' } : a
+      ));
+    } catch (error) {
+      toast.error('Ошибка отметки');
+    }
   }, []);
 
-  const handleAddAthlete = useCallback(() => {
+  const handleAddAthlete = useCallback(async () => {
     if (!newAthlete.name || !newAthlete.group) {
       toast.error('Заполните все поля');
       return;
     }
     
-    const athlete: Athlete = {
-      id: Math.max(...athletes.map(a => a.id), 0) + 1,
-      name: newAthlete.name,
-      group: newAthlete.group,
-      attendance: 0,
-      status: newAthlete.status,
-      lastVisit: 'Никогда',
-    };
-    
-    setAthletes(prev => [...prev, athlete]);
-    setGroups(prev => prev.map(g => 
-      g.name === newAthlete.group ? { ...g, count: g.count + 1 } : g
-    ));
-    
-    toast.success('Спортсмен добавлен');
-    setNewAthlete({ name: '', group: '', status: 'active' });
-    setShowAddAthlete(false);
-  }, [newAthlete, athletes]);
+    try {
+      const res = await fetch(`${API_URL}?path=athletes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAthlete)
+      });
+      
+      const athlete = await res.json();
+      setAthletes(prev => [...prev, athlete]);
+      await loadData();
+      
+      toast.success('Спортсмен добавлен');
+      setNewAthlete({ name: '', group: '', status: 'active' });
+      setShowAddAthlete(false);
+    } catch (error) {
+      toast.error('Ошибка добавления');
+    }
+  }, [newAthlete]);
 
-  const handleEditAthlete = useCallback(() => {
+  const handleEditAthlete = useCallback(async () => {
     if (!selectedAthlete) return;
     
-    setAthletes(prev => prev.map(a => 
-      a.id === selectedAthlete.id ? selectedAthlete : a
-    ));
-    
-    toast.success('Изменения сохранены');
-    setShowEditAthlete(false);
-    setSelectedAthlete(null);
+    try {
+      await fetch(`${API_URL}?path=athletes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(selectedAthlete)
+      });
+      
+      setAthletes(prev => prev.map(a => 
+        a.id === selectedAthlete.id ? selectedAthlete : a
+      ));
+      await loadData();
+      
+      toast.success('Изменения сохранены');
+      setShowEditAthlete(false);
+      setSelectedAthlete(null);
+    } catch (error) {
+      toast.error('Ошибка сохранения');
+    }
   }, [selectedAthlete]);
 
-  const handleEditGroup = useCallback(() => {
+  const handleEditGroup = useCallback(async () => {
     if (!selectedGroup) return;
     
-    setGroups(prev => prev.map(g => 
-      g.id === selectedGroup.id ? selectedGroup : g
-    ));
-    
-    toast.success('Группа обновлена');
-    setShowEditGroup(false);
-    setSelectedGroup(null);
+    try {
+      await fetch(`${API_URL}?path=groups`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(selectedGroup)
+      });
+      
+      setGroups(prev => prev.map(g => 
+        g.id === selectedGroup.id ? selectedGroup : g
+      ));
+      
+      toast.success('Группа обновлена');
+      setShowEditGroup(false);
+      setSelectedGroup(null);
+    } catch (error) {
+      toast.error('Ошибка обновления');
+    }
   }, [selectedGroup]);
 
-  const handleAddSchedule = useCallback(() => {
+  const handleAddSchedule = useCallback(async () => {
     if (!newSchedule.group || !newSchedule.day || !newSchedule.time || !newSchedule.duration) {
       toast.error('Заполните все поля');
       return;
     }
     
-    const schedule: Schedule = {
-      id: Math.max(...schedules.map(s => s.id), 0) + 1,
-      ...newSchedule,
-    };
-    
-    setSchedules(prev => [...prev, schedule]);
-    toast.success('Тренировка добавлена');
-    setNewSchedule({ group: '', day: '', time: '', duration: '' });
-    setShowAddSchedule(false);
-  }, [newSchedule, schedules]);
+    try {
+      const res = await fetch(`${API_URL}?path=schedules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSchedule)
+      });
+      
+      const schedule = await res.json();
+      setSchedules(prev => [...prev, schedule]);
+      
+      toast.success('Тренировка добавлена');
+      setNewSchedule({ group: '', day: '', time: '', duration: '' });
+      setShowAddSchedule(false);
+    } catch (error) {
+      toast.error('Ошибка добавления');
+    }
+  }, [newSchedule]);
 
-  const handleDeleteSchedule = useCallback((id: number) => {
-    setSchedules(prev => prev.filter(s => s.id !== id));
-    toast.success('Тренировка удалена');
+  const handleDeleteSchedule = useCallback(async (id: number) => {
+    try {
+      await fetch(`${API_URL}?path=schedules&id=${id}`, {
+        method: 'DELETE'
+      });
+      
+      setSchedules(prev => prev.filter(s => s.id !== id));
+      toast.success('Тренировка удалена');
+    } catch (error) {
+      toast.error('Ошибка удаления');
+    }
   }, []);
 
   const filteredSchedules = useMemo(() => {
@@ -283,6 +340,17 @@ const Index = () => {
       ? schedules.filter(s => s.group === selectedGroupForSchedule)
       : schedules;
   }, [schedules, selectedGroupForSchedule]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Icon name="Loader2" size={48} className="animate-spin text-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Загрузка данных...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-4 pb-20">
